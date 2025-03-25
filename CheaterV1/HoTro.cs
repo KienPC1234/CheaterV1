@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using Gma.System.MouseKeyHook;
 using WindowsInput;
-using WindowsInput.Events.Sources;
 
 namespace CheaterV1
 {
@@ -19,12 +18,13 @@ namespace CheaterV1
         private IKeyboardMouseEvents globalHook;
         private Keys currentKey = Keys.None;
         private CancellationTokenSource cts;
-        private IKeyboardEventSource keyboard;
+        private InputSimulator simulator;
 
         public HoTro()
         {
             LoadKeyMappings();
             SetupKeyboardHook();
+            simulator = new InputSimulator();
         }
 
         private void SetupKeyboardHook()
@@ -32,10 +32,9 @@ namespace CheaterV1
             try
             {
                 globalHook = Hook.GlobalEvents();
-                keyboard = WindowsInput.Capture.Global.KeyboardAsync();
                 globalHook.KeyDown += async (sender, e) =>
                 {
-                    if (e.KeyCode == Keys.RMenu) // Sử dụng Right Alt để tạm dừng/tiếp tục
+                    if (e.KeyCode == Keys.RMenu)
                     {
                         e.Handled = true;
                         isPaused = !isPaused;
@@ -95,6 +94,7 @@ namespace CheaterV1
             }
             string[] words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             int wordCount = 0;
+
             foreach (var word in words)
             {
                 if (token.IsCancellationRequested) break;
@@ -103,17 +103,27 @@ namespace CheaterV1
                     await Task.Delay(100, token);
                     if (token.IsCancellationRequested) return;
                 }
-                var events = Simulate.Events().Click(word);
-                using (keyboard.Suspend())
+
+                foreach (char c in word)
                 {
-                    await events.Invoke();
+                    if (token.IsCancellationRequested) break;
+                    if (char.IsUpper(c))
+                    {
+                        simulator.Keyboard.ModifiedKeyStroke(VirtualKeyCode.SHIFT, CharToVirtualKeyCode(char.ToLower(c)));
+                    }
+                    else
+                    {
+                        simulator.Keyboard.KeyPress(CharToVirtualKeyCode(c));
+                    }
+                    await Task.Delay(random.Next(100, 200), token);
                 }
-                var spaceEvents = Simulate.Events().Click(" ");
-                using (keyboard.Suspend())
+
+                if (!token.IsCancellationRequested)
                 {
-                    await spaceEvents.Invoke();
+                    simulator.Keyboard.KeyPress(VirtualKeyCode.SPACE);
+                    await Task.Delay(random.Next(200, 300), token);
                 }
-                await Task.Delay(random.Next(50, 100), token); 
+
                 wordCount++;
                 if (wordCount >= random.Next(10, 18))
                 {
@@ -124,6 +134,34 @@ namespace CheaterV1
             if (!token.IsCancellationRequested) currentKey = Keys.None;
         }
 
+        private VirtualKeyCode CharToVirtualKeyCode(char c)
+        {
+            if (char.IsLetter(c))
+            {
+                return (VirtualKeyCode)Enum.Parse(typeof(VirtualKeyCode), "VK_" + char.ToUpper(c));
+            }
+            if (char.IsDigit(c))
+            {
+                return (VirtualKeyCode)Enum.Parse(typeof(VirtualKeyCode), "VK_" + c);
+            }
+            return c switch
+            {
+                ' ' => VirtualKeyCode.SPACE,
+                '+' => VirtualKeyCode.OEM_PLUS,
+                '-' => VirtualKeyCode.OEM_MINUS,
+                ',' => VirtualKeyCode.OEM_COMMA,
+                '.' => VirtualKeyCode.OEM_PERIOD,
+                '/' => VirtualKeyCode.OEM_2,
+                ';' => VirtualKeyCode.OEM_1,
+                '=' => VirtualKeyCode.OEM_PLUS,
+                '[' => VirtualKeyCode.OEM_4,
+                ']' => VirtualKeyCode.OEM_6,
+                '\\' => VirtualKeyCode.OEM_5,
+                '\'' => VirtualKeyCode.OEM_7,
+                _ => VirtualKeyCode.SPACE
+            };
+        }
+
         public void Dispose()
         {
             if (cts != null)
@@ -132,7 +170,6 @@ namespace CheaterV1
                 cts.Dispose();
             }
             globalHook?.Dispose();
-            keyboard?.Dispose();
         }
 
         private class KeyMapping
